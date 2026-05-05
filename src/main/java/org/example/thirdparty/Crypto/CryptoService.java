@@ -81,10 +81,10 @@ public class CryptoService {
 
     public Optional<String> certToPEM(X509Certificate certificate){
         try{
-            //TODO Fix this method
             StringWriter stringWriter = new StringWriter();
             JcaPEMWriter pemWriter = new JcaPEMWriter(stringWriter);
-            pemWriter.writeObject(certificate);
+            pemWriter.writeObject((X509Certificate)certificate);
+            pemWriter.close();
             return Optional.of(stringWriter.toString());
         }catch(IOException e){
             return Optional.empty();

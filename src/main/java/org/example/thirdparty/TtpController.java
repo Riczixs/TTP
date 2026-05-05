@@ -24,12 +24,25 @@ public class TtpController {
         return ok(securityService.getPublicKey().getEncoded());
     }
 
-    //Produces bytes of the new PublicKey Certificate
-    @PostMapping(value = "/register", consumes = "application/json", produces = "application/json")
-    public ResponseEntity<Client> register(@RequestBody ClientRegisterDto payload){
+    /**
+     *
+     * @param payload (publicKey in UUID, clientId PEM string certificate)
+     * @return PEM string certificate
+     */
+    @PostMapping(path = "/register", consumes = "application/json", produces = "text/plain")
+    public ResponseEntity<String> register(@RequestBody ClientRegisterDto payload){
         try{
-            Client c = securityService.clientRegister(payload);
-            return ResponseEntity.ok(c);
+            String cert = securityService.clientRegister(payload);
+            return ResponseEntity.ok(cert);
+        }catch (Exception e){
+            return ResponseEntity.badRequest().build();
+        }
+    }
+
+    @PostMapping(path ="/auth", consumes = "application/json", produces = "text/plain")
+    public ResponseEntity<String> auth(@RequestBody ClientAuthDto payload){
+        try{
+            return ResponseEntity.ok(securityService.clientAuthorization(payload));
         }catch (Exception e){
             return ResponseEntity.badRequest().build();
         }
@@ -40,4 +53,8 @@ public class TtpController {
         return ok().build();
     }
 
+    @GetMapping(path = "/clients")
+    public ResponseEntity<Iterable<Client>> getClients(){
+        return ResponseEntity.ok(securityService.getCLients());
+    }
 }

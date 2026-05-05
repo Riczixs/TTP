@@ -17,9 +17,10 @@ public class Client {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    @Column(name="public_key",unique = true)
+    @Column(name="public_key",unique = true, length = 3000)
     private String publicKey;
 
+    @Column(name="cert", length = 3000)
     private String cert;
 
     @Column(name = "client_id")

@@ -11,10 +11,7 @@ import org.bouncycastle.openssl.PEMParser;
 import org.bouncycastle.openssl.jcajce.JcaPEMWriter;
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
 import org.bouncycastle.util.encoders.Base64Encoder;
-import org.example.thirdparty.Client;
-import org.example.thirdparty.ClientMapper;
-import org.example.thirdparty.ClientRegisterDto;
-import org.example.thirdparty.TtpRepository;
+import org.example.thirdparty.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import javax.crypto.Cipher;
@@ -63,9 +60,14 @@ public class SecurityService{
         return keyPair.getPrivate();
     } //PKCS1
 
-    //PublicKey -> String PEM
-    public Client clientRegister(ClientRegisterDto clientDto) throws GeneralSecurityException {
-        Client c = clientMapper.dtoToClient(clientDto);
+    /**
+     *
+     * @param clientDto
+     * @return
+     * @throws GeneralSecurityException
+     */
+    public String clientRegister(ClientRegisterDto clientDto) throws GeneralSecurityException {
+        Client c = clientMapper.registerDtoToClient(clientDto);
         Base64.Decoder decoder = Base64.getDecoder();
         var decodedKey = decoder.decode(clientDto.publicKey());
         X509Certificate cert = cryptoService.createCertificate(
@@ -75,10 +77,24 @@ public class SecurityService{
         ).orElseThrow(() -> new RuntimeException());
         String certPEM = cryptoService.certToPEM(cert).orElseThrow(() -> new RuntimeException());
         c.setCert(certPEM);
-        //Client clientResult = ttpRepository.save(c);
-//        if(clientResult == null){
-//            throw new RuntimeException();
-//        }
-        return c;
+        ttpRepository.save(c);
+        Base64.Encoder encoder = Base64.getEncoder();
+        var encodedCert = encoder.encodeToString(cert.getEncoded());
+        return encodedCert;
     }
+
+    public String clientAuthorization(ClientAuthDto clientDto) throws GeneralSecurityException {
+        Base64.Decoder decoder = Base64.getDecoder();
+        var decodedCert = decoder.decode(clientDto.cert());
+        cryptoService.PEMToCert(decodedCert);
+        cryptoService.verifyCertificate(cert, keyPair.getPublic());
+        return "CERTYFIKAT POPRAWNY";
+    }
+
+
+    public Iterable<Client> getCLients(){
+        return ttpRepository.findAll();
+    }
+
+
 }
