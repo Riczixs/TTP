@@ -4,6 +4,7 @@ import org.bouncycastle.cert.X509CertificateHolder;
 import org.bouncycastle.cert.X509v1CertificateBuilder;
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
 import org.bouncycastle.cert.jcajce.JcaX509v1CertificateBuilder;
+import org.bouncycastle.oer.OEROptional;
 import org.bouncycastle.openssl.PEMKeyPair;
 import org.bouncycastle.openssl.PEMParser;
 import org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
@@ -13,24 +14,45 @@ import org.bouncycastle.util.io.pem.PemObject;
 import org.bouncycastle.util.io.pem.PemReader;
 
 import javax.crypto.Cipher;
-import java.io.IOException;
-import java.io.StringReader;
-import java.io.StringWriter;
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
+import java.io.*;
 import java.math.BigInteger;
 import java.security.*;
 import java.security.cert.CertificateException;
+import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.X509EncodedKeySpec;
+import java.util.Base64;
 import java.util.Date;
 import java.util.Optional;
 
 public class CryptoService {
-    public Optional<byte[]> rsaEncrypt(PublicKey publicKey, byte[] data){
+
+    public byte[] decodeBase64(String data) {
+        Base64.Decoder decoder = Base64.getDecoder();
+        var decodedCert = decoder.decode(data);
+        return decodedCert;
+    }
+    public String encryptBase64(byte[] data) {
+        Base64.Encoder encoder = Base64.getEncoder();
+        return encoder.encodeToString(data);
+    }
+
+    /**
+     *
+     * @param publicKey
+     * @param data
+     * @return base64 string
+     */
+    public Optional<String> rsaEncrypt(PublicKey publicKey, byte[] data){
         try {
             Cipher encryptCipher = Cipher.getInstance("RSA/ECB/OAEPWithSHA-256AndMGF1Padding");
             encryptCipher.init(Cipher.ENCRYPT_MODE, publicKey); //Someone's PK
-            return Optional.of(encryptCipher.doFinal(data));
+            var encryptedData = encryptCipher.doFinal(data);
+            Base64.Encoder encoder = Base64.getEncoder();
+            return Optional.of(encoder.encodeToString(encryptedData));
         }catch (Exception exception){
             return Optional.empty();
         }
@@ -40,7 +62,7 @@ public class CryptoService {
         try{
             Cipher decryptCipher = Cipher.getInstance("RSA/ECB/OAEPWithSHA-256AndMGF1Padding");
             decryptCipher.init(Cipher.DECRYPT_MODE, privateKey);
-            return Optional.of(decryptCipher.doFinal(data));
+            return Optional.of(decryptCipher.doFinal((data)));
         }catch (Exception exception){
             return Optional.empty();
         }
@@ -101,29 +123,55 @@ public class CryptoService {
         }
     }
 
-    public byte[] pkEncode(PublicKey publicKey){
-        return publicKey.getEncoded();
+    public Optional<String> publicKeyToPem(PublicKey publicKey) {
+        try{
+            StringWriter sWrt = new StringWriter();
+            JcaPEMWriter pemWriter = new JcaPEMWriter(sWrt);
+            pemWriter.writeObject(publicKey);
+            pemWriter.close();
+            return Optional.of(sWrt.toString());
+        }catch(IOException e){
+            return Optional.empty();
+        }
     }
 
-    public Optional<PublicKey> pkDecode(byte[] keyBytes) throws GeneralSecurityException {
-        KeyFactory keyFactory = KeyFactory.getInstance("RSA", "BCFIPS");
-        return Optional.of(keyFactory.generatePublic(new X509EncodedKeySpec(keyBytes)));
-    }
-
-    public String publicKeyToPEM(PublicKey publicKey) throws IOException {
-        StringWriter sWrt = new StringWriter();
-        JcaPEMWriter pemWriter = new JcaPEMWriter(sWrt);
-        pemWriter.writeObject(publicKey);
-        pemWriter.close();
-        return sWrt.toString();
-    }
-
-    public Optional<PublicKey> pemToPublicKey(byte[] publicKey){
+    public Optional<PublicKey> pemToPublicKey(byte[] publicKey) {
         try{
             KeyFactory keyFactory = KeyFactory.getInstance("RSA", "BCFIPS");
             return Optional.of(keyFactory.generatePublic(new X509EncodedKeySpec(publicKey)));
         } catch (NoSuchAlgorithmException | NoSuchProviderException | InvalidKeySpecException e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    public byte[] pkObjectToBytes(PublicKey publicKey){
+        return publicKey.getEncoded();
+    }
+
+    public Optional<PublicKey> pkBytesToObject(byte[] keyBytes){
+        try{
+            KeyFactory keyFactory = KeyFactory.getInstance("RSA", "BCFIPS");
+            return Optional.of(keyFactory.generatePublic(new X509EncodedKeySpec(keyBytes)));
+        }catch(GeneralSecurityException e){
+            return Optional.empty();
+        }
+    }
+
+    public Optional<X509Certificate> certDecode(byte[] certBytes) throws GeneralSecurityException {
+        CertificateFactory certFactory = CertificateFactory.getInstance("X.509", "BCFIPS");
+        InputStream certStream = new ByteArrayInputStream(certBytes);
+        return Optional.of((X509Certificate) certFactory.generateCertificate(certStream));
+    }
+
+    public Optional<SecretKey> createSessionKey() {
+        try{
+            SecureRandom sr = new SecureRandom();
+            KeyGenerator kg = KeyGenerator.getInstance("AES", "BCFIPS");
+            kg.init(sr);
+            SecretKey key = kg.generateKey();
+            return Optional.of(key);
+        }catch(NoSuchAlgorithmException |  NoSuchProviderException e){
+            return Optional.empty();
         }
     }
 }

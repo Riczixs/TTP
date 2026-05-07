@@ -10,6 +10,7 @@ import org.bouncycastle.cert.jcajce.JcaX509v1CertificateBuilder;
 import org.bouncycastle.openssl.PEMParser;
 import org.bouncycastle.openssl.jcajce.JcaPEMWriter;
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
+import org.bouncycastle.util.Bytes;
 import org.bouncycastle.util.encoders.Base64Encoder;
 import org.example.thirdparty.*;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,10 +38,16 @@ public class SecurityService{
     private CryptoService cryptoService;
     public ClientMapper clientMapper;
     public TtpRepository ttpRepository;
+    public SessionRepository sessionRepository;
 
     //For Spring ApplicationContext
-    public SecurityService(TtpRepository ttpRepository){
+    public PublicKey getPublicKey(){ //X.509
+        return keyPair.getPublic();
+    } //X509
+
+    public SecurityService(TtpRepository ttpRepository, SessionRepository sessionRepository) {
         this.ttpRepository = ttpRepository;
+        this.sessionRepository = sessionRepository;
         this.cryptoService = new CryptoService();
         this.clientMapper = new ClientMapper();
         try {
@@ -52,49 +59,96 @@ public class SecurityService{
         }
     }
 
-    public PublicKey getPublicKey(){ //X.509
-        return keyPair.getPublic();
-    } //X509
-
     public PrivateKey getPrivateKey(){ //PKCS#8
         return keyPair.getPrivate();
     } //PKCS1
 
+
+
+
     /**
      *
-     * @param clientDto
+     * @param clientDto (publicKey : base64 RSA-encoded String, clientId : base64 RSA-encoded String)
      * @return
      * @throws GeneralSecurityException
      */
+    @Transactional
     public String clientRegister(ClientRegisterDto clientDto) throws GeneralSecurityException {
-        Client c = clientMapper.registerDtoToClient(clientDto);
-        Base64.Decoder decoder = Base64.getDecoder();
-        var decodedKey = decoder.decode(clientDto.publicKey());
+        //1 Checking if client of given id already exists
+        var decodedId = cryptoService.decodeBase64(clientDto.clientId());
+        var decryptedId = cryptoService.rsaDecrypt(decodedId, keyPair.getPrivate()).orElseThrow(() -> new RuntimeException());
+        if(ttpRepository.existsByClientId(decryptedId)){
+            throw new IllegalArgumentException();
+        }
+        //2 Register Client and generate Public Key Certificate
+        var encryptedKeyBytes = cryptoService.decodeBase64(clientDto.publicKey());
+        var decryptedPublicKey = cryptoService.rsaDecrypt(encryptedKeyBytes, keyPair.getPrivate()).orElseThrow(()->new RuntimeException());
         X509Certificate cert = cryptoService.createCertificate(
-                cryptoService.pkDecode(decodedKey)
+                cryptoService.pkBytesToObject(decryptedPublicKey)
                         .orElseThrow(() -> new RuntimeException()),
                 keyPair.getPrivate()
         ).orElseThrow(() -> new RuntimeException());
-        String certPEM = cryptoService.certToPEM(cert).orElseThrow(() -> new RuntimeException());
-        c.setCert(certPEM);
+        Client c = Client.builder()
+                .clientId(decryptedId)
+                .publicKey(decryptedPublicKey)
+                .cert(cert.getEncoded())
+                .build();
         ttpRepository.save(c);
-        Base64.Encoder encoder = Base64.getEncoder();
-        var encodedCert = encoder.encodeToString(cert.getEncoded());
-        return encodedCert;
+        return cryptoService.encryptBase64(cert.getEncoded());
     }
 
-    public String clientAuthorization(ClientAuthDto clientDto) throws GeneralSecurityException {
+    /**
+     *
+     * @param clientDto (base64 String certificate, base64 String clientId, base64 String sessionId)
+     * @return sessionKey
+     * @throws GeneralSecurityException
+     */
+    @Transactional
+    public ClientSessionDto clientAuthorization(ClientAuthDto clientDto) throws GeneralSecurityException {
+        var cert = cryptoService.certDecode(cryptoService.decodeBase64(clientDto.cert())).orElseThrow(() -> new RuntimeException());
+        cryptoService.verifyCertificate(cert, keyPair.getPublic());
+        //Create Session object
+        var sk = cryptoService.createSessionKey().orElseThrow(() -> new RuntimeException());
+        Session s = Session.builder()
+                .part1(UUID.nameUUIDFromBytes(cryptoService.decodeBase64(clientDto.clientId())))
+                .sessionKey("")
+                .build();
+        sessionRepository.save(s);
+
+        return ClientSessionDto.builder()
+                .sessionId(cryptoService.rsaEncrypt(
+                        keyPair.getPublic(),
+                        s.getSessionId().toString().getBytes())
+                            .orElseThrow(() -> new RuntimeException()))
+                .build();
+    }
+
+    /**
+     * Client
+     * @param clientDto(base64 String Cert, base64 String ClientId, base64 String sessionId)
+     * @return
+     * @throws GeneralSecurityException
+     */
+    @Transactional
+    public ClientSessionDto sessionAuthorization(ClientAuthDto clientDto) throws GeneralSecurityException {
         Base64.Decoder decoder = Base64.getDecoder();
         var decodedCert = decoder.decode(clientDto.cert());
-        cryptoService.PEMToCert(decodedCert);
+        var cert = cryptoService.certDecode(decodedCert).orElseThrow(() -> new RuntimeException());
         cryptoService.verifyCertificate(cert, keyPair.getPublic());
-        return "CERTYFIKAT POPRAWNY";
+        var decodedSessionId = cryptoService.rsaDecrypt(null, keyPair.getPrivate()).orElseThrow(() -> new RuntimeException());
+        Session s = sessionRepository.findById(UUID.nameUUIDFromBytes(decodedSessionId)).orElseThrow(() -> new RuntimeException());
+        //Setting Session part2
+        var decodedClientId = decoder.decode(clientDto.clientId());
+        s.setPart2(UUID.nameUUIDFromBytes(decodedClientId));
+        //Getting Existing SessionKey
+        //DecodeRSA SessionKey
+        var decoded = cryptoService.rsaDecrypt(null, keyPair.getPrivate());
+        return ClientSessionDto.builder()
+                .sessionId("")
+                .build();
     }
 
-
-    public Iterable<Client> getCLients(){
+    public Iterable<Client> getClients(){
         return ttpRepository.findAll();
     }
-
-
 }

@@ -39,10 +39,21 @@ public class TtpController {
         }
     }
 
+    /**
+     *
+     * @param payload (String cert, UUID clientId, String sessionId)
+     * @return
+     */
     @PostMapping(path ="/auth", consumes = "application/json", produces = "text/plain")
-    public ResponseEntity<String> auth(@RequestBody ClientAuthDto payload){
+    public ResponseEntity<ClientSessionDto> auth(@RequestBody ClientAuthDto payload){
         try{
-            return ResponseEntity.ok(securityService.clientAuthorization(payload));
+            if(!payload.sessionId().isEmpty()){ //First of session init
+                var client = securityService.clientAuthorization(payload);
+                return ResponseEntity.ok(client);
+            }else{ //Second of session init
+                var client = securityService.sessionAuthorization(payload);
+                return ResponseEntity.ok(client);
+            }
         }catch (Exception e){
             return ResponseEntity.badRequest().build();
         }
@@ -55,6 +66,6 @@ public class TtpController {
 
     @GetMapping(path = "/clients")
     public ResponseEntity<Iterable<Client>> getClients(){
-        return ResponseEntity.ok(securityService.getCLients());
+        return ResponseEntity.ok(securityService.getClients());
     }
 }

@@ -17,12 +17,12 @@ public class Client {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    @Column(name="public_key",unique = true, length = 3000)
-    private String publicKey;
+    @Column(name="public_key",unique = true)
+    private byte[] publicKey;
 
-    @Column(name="cert", length = 3000)
-    private String cert;
+    @Column(name="cert")
+    private byte[] cert;
 
     @Column(name = "client_id")
-    private UUID clientId;
+    private byte[] clientId;
 }
