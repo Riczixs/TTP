@@ -41,9 +41,9 @@ public class SecurityService{
     public SessionRepository sessionRepository;
 
     //For Spring ApplicationContext
-    public PublicKey getPublicKey(){ //X.509
-        return keyPair.getPublic();
-    } //X509
+    public String getPublicKey(){ //X.509
+        return cryptoService.encryptBase64(keyPair.getPublic().getEncoded());
+    }
 
     public SecurityService(TtpRepository ttpRepository, SessionRepository sessionRepository) {
         this.ttpRepository = ttpRepository;
@@ -63,9 +63,6 @@ public class SecurityService{
         return keyPair.getPrivate();
     } //PKCS1
 
-
-
-
     /**
      *
      * @param clientDto (publicKey : base64 RSA-encoded String, clientId : base64 RSA-encoded String)
@@ -81,16 +78,15 @@ public class SecurityService{
             throw new IllegalArgumentException();
         }
         //2 Register Client and generate Public Key Certificate
-        var encryptedKeyBytes = cryptoService.decodeBase64(clientDto.publicKey());
-        var decryptedPublicKey = cryptoService.rsaDecrypt(encryptedKeyBytes, keyPair.getPrivate()).orElseThrow(()->new RuntimeException());
+        var decodedKeyBytes = cryptoService.decodeBase64(clientDto.publicKey());
         X509Certificate cert = cryptoService.createCertificate(
-                cryptoService.pkBytesToObject(decryptedPublicKey)
+                cryptoService.pkBytesToObject(decodedKeyBytes)
                         .orElseThrow(() -> new RuntimeException()),
                 keyPair.getPrivate()
         ).orElseThrow(() -> new RuntimeException());
         Client c = Client.builder()
                 .clientId(decryptedId)
-                .publicKey(decryptedPublicKey)
+                .publicKey(decodedKeyBytes)
                 .cert(cert.getEncoded())
                 .build();
         ttpRepository.save(c);
@@ -105,22 +101,34 @@ public class SecurityService{
      */
     @Transactional
     public ClientSessionDto clientAuthorization(ClientAuthDto clientDto) throws GeneralSecurityException {
-        var cert = cryptoService.certDecode(cryptoService.decodeBase64(clientDto.cert())).orElseThrow(() -> new RuntimeException());
+        var cert = cryptoService.certBytesToObject(cryptoService.decodeBase64(clientDto.cert())).orElseThrow(() -> new RuntimeException());
         cryptoService.verifyCertificate(cert, keyPair.getPublic());
         //Create Session object
         var sk = cryptoService.createSessionKey().orElseThrow(() -> new RuntimeException());
         Session s = Session.builder()
-                .part1(UUID.nameUUIDFromBytes(cryptoService.decodeBase64(clientDto.clientId())))
-                .sessionKey("")
+                .part1(cryptoService.decodeBase64(clientDto.clientId()))
+                .sessionKey(sk.getEncoded())
                 .build();
         sessionRepository.save(s);
 
+        var clientId = cryptoService.rsaDecrypt(
+                            cryptoService.decodeBase64(clientDto.clientId()),
+                            keyPair.getPrivate()
+                        ).orElseThrow(() -> new RuntimeException());
+
+        var client = ttpRepository.findByClientId(clientId).orElseThrow(() -> new RuntimeException());
+        var clientPublicKey = cryptoService.pkBytesToObject(client.getPublicKey()).orElseThrow(() -> new RuntimeException());
         return ClientSessionDto.builder()
                 .sessionId(cryptoService.rsaEncrypt(
-                        keyPair.getPublic(),
-                        s.getSessionId().toString().getBytes())
-                            .orElseThrow(() -> new RuntimeException()))
-                .build();
+                                clientPublicKey,
+                                sk.getEncoded()
+                            ).orElseThrow(() -> new RuntimeException())
+                )
+                .sessionKey(cryptoService.rsaEncrypt(
+                                clientPublicKey,
+                                sk.getEncoded()
+                            ).orElseThrow(() -> new RuntimeException())
+                ).build();
     }
 
     /**
@@ -133,13 +141,13 @@ public class SecurityService{
     public ClientSessionDto sessionAuthorization(ClientAuthDto clientDto) throws GeneralSecurityException {
         Base64.Decoder decoder = Base64.getDecoder();
         var decodedCert = decoder.decode(clientDto.cert());
-        var cert = cryptoService.certDecode(decodedCert).orElseThrow(() -> new RuntimeException());
+        var cert = cryptoService.certBytesToObject(decodedCert).orElseThrow(() -> new RuntimeException());
         cryptoService.verifyCertificate(cert, keyPair.getPublic());
         var decodedSessionId = cryptoService.rsaDecrypt(null, keyPair.getPrivate()).orElseThrow(() -> new RuntimeException());
         Session s = sessionRepository.findById(UUID.nameUUIDFromBytes(decodedSessionId)).orElseThrow(() -> new RuntimeException());
         //Setting Session part2
         var decodedClientId = decoder.decode(clientDto.clientId());
-        s.setPart2(UUID.nameUUIDFromBytes(decodedClientId));
+        s.setPart2(decodedClientId);
         //Getting Existing SessionKey
         //DecodeRSA SessionKey
         var decoded = cryptoService.rsaDecrypt(null, keyPair.getPrivate());

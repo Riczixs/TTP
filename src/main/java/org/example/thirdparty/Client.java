@@ -12,17 +12,26 @@ import java.util.UUID;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
+/**
+ *
+ * @param publicKey pure X509 bytes of PublicKey object
+ * @param cert pure PKCS1 bytes of X509Certificate object
+ * @param clientId bytes of UUID
+ */
 public class Client {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    @Column(name="public_key",unique = true)
+    @Lob
+    @Column(name="public_key", columnDefinition = "BLOB")
     private byte[] publicKey;
 
-    @Column(name="cert")
+    @Lob
+    @Column(name="cert", columnDefinition = "BLOB")
     private byte[] cert;
 
-    @Column(name = "client_id")
+    @Lob
+    @Column(name = "client_id", columnDefinition = "BLOB")
     private byte[] clientId;
 }

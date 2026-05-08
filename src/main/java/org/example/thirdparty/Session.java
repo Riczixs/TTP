@@ -16,12 +16,15 @@ public class Session {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID sessionId;
 
-    @Column(name="part1", nullable = true)
-    private UUID part1;
+    @Lob
+    @Column(name="part1", nullable = true, columnDefinition = "BLOB")
+    private byte[] part1;
 
-    @Column(name="part2", nullable = true)
-    private UUID part2;
+    @Lob
+    @Column(name="part2", nullable = true, columnDefinition = "BLOB")
+    private byte[] part2;
 
-    @Column(name="session_key", nullable = true)
-    private String sessionKey;
+    @Lob
+    @Column(name="session_key", nullable = true, columnDefinition = "BLOB")
+    private byte[] sessionKey;
 }

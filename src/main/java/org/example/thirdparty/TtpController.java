@@ -20,15 +20,15 @@ public class TtpController {
     private final SecurityService securityService;
 
     @GetMapping(path = "/publickey", produces = "text/plain")
-    public ResponseEntity<byte[]> getPublicKey(){
-        return ok(securityService.getPublicKey().getEncoded());
+    public ResponseEntity<String> getPublicKey(){
+        return ResponseEntity.ok(securityService.getPublicKey());
     }
-
     /**
      *
      * @param payload (publicKey in UUID, clientId PEM string certificate)
      * @return PEM string certificate
      */
+    /// /// /// MARYSIA BN NOTES!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     @PostMapping(path = "/register", consumes = "application/json", produces = "text/plain")
     public ResponseEntity<String> register(@RequestBody ClientRegisterDto payload){
         try{
@@ -44,10 +44,10 @@ public class TtpController {
      * @param payload (String cert, UUID clientId, String sessionId)
      * @return
      */
-    @PostMapping(path ="/auth", consumes = "application/json", produces = "text/plain")
+    @PostMapping(path ="/auth", consumes = "application/json", produces = "application/json")
     public ResponseEntity<ClientSessionDto> auth(@RequestBody ClientAuthDto payload){
         try{
-            if(!payload.sessionId().isEmpty()){ //First of session init
+            if(payload.sessionId().isEmpty()){ //First of session init
                 var client = securityService.clientAuthorization(payload);
                 return ResponseEntity.ok(client);
             }else{ //Second of session init
