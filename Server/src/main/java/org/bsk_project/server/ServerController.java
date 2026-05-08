@@ -14,6 +14,20 @@ public class ServerController {
         this.serverService = serverService;
     }
 
+    /**
+     * @STARTING_POINT_OF_CLIENT-SERVER_COMMUNICATION
+     * @return
+     */
+    @GetMapping
+    public ResponseEntity<?> getServer(){
+        try{
+            serverService.initSession();
+            return ResponseEntity.noContent().build();
+        }catch (Exception e){
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
     @GetMapping("/register")
     public ResponseEntity<String> register(){
         try{

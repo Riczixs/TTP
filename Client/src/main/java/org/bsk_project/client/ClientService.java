@@ -1,7 +1,8 @@
-package org.bsk_project.server;
+package org.bsk_project.client;
+import jakarta.servlet.http.HttpSession;
 import lombok.Getter;
 import lombok.Setter;
-import org.bsk_project.server.Crypto.CryptoService;
+import org.bsk_project.client.Crypto.CryptoService;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -14,10 +15,10 @@ import java.util.Map;
 import java.util.UUID;
 
 @Service
-public class ServService {
-    private CryptoService cryptoService;
+public class ClientService {
     private HttpService httpService;
-    public ServService(HttpService httpService) {
+    private CryptoService cryptoService;
+    public ClientService(HttpService httpService) {
         this.httpService = httpService;
         this.cryptoService = new CryptoService();
         try{
@@ -29,7 +30,6 @@ public class ServService {
             e.printStackTrace();
         }
     }
-
     public void getTtpPublicKey(){
         Credentials.ttpPublicKey = httpService.getKey().orElseThrow(RuntimeException::new);
     }
@@ -43,62 +43,47 @@ public class ServService {
         ObjectMapper mapper = new ObjectMapper();
         Map<String, String> payload = new HashMap();
         var tpk = cryptoService.pkBytesToObject(cryptoService.decodeBase64(Credentials.ttpPublicKey))
-                                .orElseThrow(()-> new RuntimeException("Could not decrypt the key"));
+                .orElseThrow(()-> new RuntimeException("Could not decrypt the key"));
         var rsaId = cryptoService.rsaEncrypt(
-                        tpk,
-                        Credentials.id.getBytes()
-                    ).orElseThrow(() -> new RuntimeException("Error while encrypting the id"));
+                tpk,
+                Credentials.id.getBytes()
+        ).orElseThrow(() -> new RuntimeException("Error while encrypting the id"));
         payload.put("publicKey", cryptoService.encryptBase64(Credentials.keyPair.getPublic().getEncoded()));
         payload.put("clientId", rsaId);
         Credentials.certificate = httpService.register(mapper.writeValueAsString(payload)).orElseThrow(RuntimeException::new);
         return Credentials.certificate;
     }
 
-    public String authenticate() {
+    public void authenticate(String sessionId) {
         Map<String, String> payload = new HashMap();
         payload.put("clientId", cryptoService.rsaEncrypt(
-                                    cryptoService.pkBytesToObject(
-                                        cryptoService.decodeBase64(Credentials.ttpPublicKey)
-                                    ).orElseThrow(() -> new RuntimeException("Could not decrypt the key")),
-                                    Credentials.id.getBytes()
-                                ).orElseThrow(()-> new RuntimeException("Could not encrypt the id"))
+                        cryptoService.pkBytesToObject(
+                                cryptoService.decodeBase64(Credentials.ttpPublicKey)
+                        ).orElseThrow(() -> new RuntimeException("Error during public key serialization")),
+                        Credentials.id.getBytes()
+                ).orElseThrow(() -> new RuntimeException("Could not encrypt the id"))
         );
         payload.put("cert", Credentials.certificate);
-        payload.put("sessionId", "");
+        payload.put("sessionId", sessionId);
         ObjectMapper mapper = new ObjectMapper();
-        var session = httpService.authenticate(mapper.writeValueAsString(payload)).orElseThrow(RuntimeException::new);
-        /**
-         * TODO DECODE SESSION KEY BECAUSE IT IS RSA ENCRYPTED!!!!!!!!!!!!!
-         */
+        var session = httpService.authenticate(mapper.writeValueAsString(payload)).orElseThrow(() -> new RuntimeException("Could not authenticate the session"));
         JsonNode jsonNode = mapper.readTree(session);
         Credentials.sessionId = jsonNode.get("sessionId").asText();
         Credentials.sessionKey = jsonNode.get("sessionKey").asText();
-        return session;
+        /**
+         * @TODO This is the place for httpClient call to Server for actual resource, then to Frontend with fetched resource
+         */
     }
 
-        /**
-         * 1. Client calls REST API to fetch some data
-         * 2. Server starts authentication process, sending POST Request to TTP:
-         * @see AuthenticationDto
-         * 3. TTP Checks Certificate and create Session object
-         * 4. TTP Response to (2), with (sessionId, sessionKey)
-         * 5. Server saves credentials and response to (1) with 204 No Content (TTP Authenticated)
-         * 6. Meanwhile, TTP Sends authentication request to callback url, with sessionId in the request body.
-         * 7. Client response with auth credentials and provided sessionId.
-         * 8. After successfull authentication TTP Respond with (sessionId, sessionKey)
-         * 9. Client authomatically makes HttpCall for Server resource with sessionKey
-         */
-    public void initSession() {
+    /**
+     * @apiNote Communication initialized, waiting for TTP Auth Request
+     * @see ClientLogicController
+     */
+    public void serverAuthentication() {
         try{
-            if(Credentials.ttpPublicKey == null){
-                getTtpPublicKey();
-            }
-            if(Credentials.certificate == null){
-                register();
-            }
-            authenticate();
-        }catch(Exception e){
-            throw new RuntimeException("Error initializing session");
+            httpService.initServerSession();
+        }catch (Exception e) {
+            throw new RuntimeException("Error initializing server session");
         }
     }
 
@@ -112,4 +97,5 @@ public class ServService {
         private static String sessionId;
         private static String sessionKey;
     }
+
 }

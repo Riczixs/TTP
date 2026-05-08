@@ -8,11 +8,11 @@
         <version>4.0.6</version>
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
-    <groupId>org.example</groupId>
-    <artifactId>ThirdParty</artifactId>
+    <groupId>org.bsk_project</groupId>
+    <artifactId>Client</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>ThirdParty</name>
-    <description>ThirdParty</description>
+    <name>Client</name>
+    <description>Client</description>
     <url/>
     <licenses>
         <license/>
@@ -79,6 +79,15 @@
             <artifactId>bctls-fips</artifactId>
             <version>2.1.23</version>
         </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webflux</artifactId>
+            <version>3.5.7</version>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
 
     </dependencies>
 
@@ -131,12 +140,7 @@
                         </configuration>
                     </execution>
                 </executions>
-                <configuration>
-                    <source>7</source>
-                    <target>7</target>
-                </configuration>
             </plugin>
         </plugins>
     </build>
-
 </project>
