@@ -13,8 +13,12 @@ import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
 import org.bouncycastle.util.Bytes;
 import org.bouncycastle.util.encoders.Base64Encoder;
 import org.example.thirdparty.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.ObjectMapper;
+
 import javax.crypto.Cipher;
 import java.beans.Transient;
 import java.io.IOException;
@@ -26,17 +30,14 @@ import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
 import java.security.spec.RSAKeyGenParameterSpec;
 import java.security.spec.X509EncodedKeySpec;
-import java.util.Base64;
-import java.util.Date;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.*;
 
 @Service
 public class SecurityService{
-    private KeyPairGenerator generator;
+    private final Logger logger = LoggerFactory.getLogger(SecurityService.class);
     private KeyPair keyPair;
-    private CryptoService cryptoService;
-    private HttpService httpService;
+    private final CryptoService cryptoService;
+    private final HttpService httpService;
     public ClientMapper clientMapper;
     public TtpRepository ttpRepository;
     public SessionRepository sessionRepository;
@@ -48,7 +49,7 @@ public class SecurityService{
         this.httpService = new HttpService();
         this.clientMapper = new ClientMapper();
         try {
-            generator = KeyPairGenerator.getInstance("RSA", "BCFIPS");
+            KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
             generator.initialize(new RSAKeyGenParameterSpec(4096, RSAKeyGenParameterSpec.F4));
             keyPair = generator.generateKeyPair();
         }catch(Exception exception){
@@ -74,25 +75,30 @@ public class SecurityService{
     @Transactional
     public String clientRegister(ClientRegisterDto clientDto) throws GeneralSecurityException {
         //1 Checking if client of given id already exists
-        var decodedId = cryptoService.decodeBase64(clientDto.clientId());
-        var decryptedId = cryptoService.rsaDecrypt(decodedId, keyPair.getPrivate()).orElseThrow(() -> new RuntimeException());
-        if(ttpRepository.existsByClientId(decryptedId)){
-            throw new IllegalArgumentException();
+        try{
+            var decodedId = cryptoService.decodeBase64(clientDto.clientId());
+            var decryptedId = cryptoService.rsaDecrypt(decodedId, keyPair.getPrivate());
+            if (ttpRepository.existsByClientId(decryptedId)) {
+                throw new RuntimeException("Client with id " + decryptedId + " already exists");
+            }
+            //2 Register Client and generate Public Key Certificate
+            var decodedKeyBytes = cryptoService.decodeBase64(clientDto.publicKey());
+            X509Certificate cert = cryptoService.createCertificate(
+                    cryptoService.pkBytesToObject(decodedKeyBytes),
+                    keyPair.getPrivate()
+            );
+            logger.debug("New public key certificate created");
+            Client c = Client.builder()
+                    .clientId(decryptedId)
+                    .publicKey(decodedKeyBytes)
+                    .cert(cert.getEncoded())
+                    .build();
+            ttpRepository.save(c);
+            logger.info("New client saved to database");
+            return cryptoService.encryptBase64(cert.getEncoded());
+        }catch (Exception e){
+            throw new RuntimeException(e.getMessage());
         }
-        //2 Register Client and generate Public Key Certificate
-        var decodedKeyBytes = cryptoService.decodeBase64(clientDto.publicKey());
-        X509Certificate cert = cryptoService.createCertificate(
-                cryptoService.pkBytesToObject(decodedKeyBytes)
-                        .orElseThrow(() -> new RuntimeException()),
-                keyPair.getPrivate()
-        ).orElseThrow(() -> new RuntimeException());
-        Client c = Client.builder()
-                .clientId(decryptedId)
-                .publicKey(decodedKeyBytes)
-                .cert(cert.getEncoded())
-                .build();
-        ttpRepository.save(c);
-        return cryptoService.encryptBase64(cert.getEncoded());
     }
 
     /**
@@ -103,32 +109,45 @@ public class SecurityService{
      */
     @Transactional
     public ClientSessionDto clientAuthorization(ClientAuthDto clientDto) throws GeneralSecurityException {
-        var cert = cryptoService.certBytesToObject(cryptoService.decodeBase64(clientDto.cert())).orElseThrow(() -> new RuntimeException());
-        cryptoService.verifyCertificate(cert, keyPair.getPublic());
-        //Create Session object
-        var sk = cryptoService.createSessionKey().orElseThrow(() -> new RuntimeException());
-        Session s = Session.builder()
-                .part1(cryptoService.decodeBase64(clientDto.clientId()))
-                .sessionKey(sk.getEncoded())
-                .build();
-        sessionRepository.save(s);
-        var clientId = cryptoService.rsaDecrypt(
-                            cryptoService.decodeBase64(clientDto.clientId()),
-                            keyPair.getPrivate()
-                        ).orElseThrow(() -> new RuntimeException());
-        var client = ttpRepository.findByClientId(clientId).orElseThrow(() -> new RuntimeException());
-        var clientPublicKey = cryptoService.pkBytesToObject(client.getPublicKey()).orElseThrow(() -> new RuntimeException());
+        try{
+            var cert = cryptoService.certBytesToObject(cryptoService.decodeBase64(clientDto.cert()));
+            cryptoService.verifyCertificate(cert, keyPair.getPublic());
+            //Create Session object
+            var sk = cryptoService.createSessionKey();
+            Session s = Session.builder()
+                    .part1(cryptoService.decodeBase64(clientDto.clientId()))
+                    .sessionKey(sk.getEncoded())
+                    .build();
 
+            sessionRepository.save(s);
+
+            var clientId = cryptoService.rsaDecrypt(
+                    cryptoService.decodeBase64(clientDto.clientId()),
+                    keyPair.getPrivate()
+            );
+            var client = ttpRepository.findByClientId(clientId).orElseThrow(() -> new RuntimeException("Client with id " + clientId + " not found"));
+            var clientPublicKey = cryptoService.pkBytesToObject(client.getPublicKey());
         /**
-         * @TODO Make Http call to Client for authentication
+         * @TODO Making http call to Client for authentication
          */
-        return ClientSessionDto.builder()
-                .sessionId(s.getSessionId().toString())
-                .sessionKey(cryptoService.rsaEncrypt(
-                                clientPublicKey,
-                                sk.getEncoded()
-                            ).orElseThrow(() -> new RuntimeException())
-                ).build();
+            ObjectMapper mapper = new ObjectMapper();
+            httpService.initClientAuth(mapper.writeValueAsString(
+                    Map.of("sessionId",s.getSessionId().toString())
+                    )
+            );
+            logger.debug("Initialization call made successfully");
+            return ClientSessionDto.builder()
+                    .sessionId(s.getSessionId().toString())
+                    .sessionKey(cryptoService.rsaEncrypt(
+                                    clientPublicKey,
+                                    sk.getEncoded()
+                                )
+                    )
+                    .build();
+        }catch (Exception e) {
+            logger.error("Error during client auth initialization");
+            throw new RuntimeException(e);
+        }
     }
 
     /**
@@ -139,29 +158,27 @@ public class SecurityService{
      */
     @Transactional
     public ClientSessionDto sessionAuthorization(ClientAuthDto clientDto) throws GeneralSecurityException {
-        var cert = cryptoService.certBytesToObject(cryptoService.decodeBase64(clientDto.cert())).orElseThrow(() -> new RuntimeException());
+        var cert = cryptoService.certBytesToObject(cryptoService.decodeBase64(clientDto.cert()));
         cryptoService.verifyCertificate(cert, keyPair.getPublic());
         Session s = sessionRepository.findById(
                         UUID.nameUUIDFromBytes(
                             cryptoService.decodeBase64(clientDto.sessionId())
                         )
-                    ).orElseThrow(() -> new RuntimeException());
+                    ).orElseThrow(() -> new RuntimeException("Session with id " + clientDto.sessionId() + " not found"));
         var decodedClientId = cryptoService.rsaDecrypt(
                 cryptoService.decodeBase64(clientDto.clientId()),
                 keyPair.getPrivate()
-        ).orElseThrow(() -> new RuntimeException());
-
+        );
         s.setPart2(decodedClientId);
         sessionRepository.save(s);
-        var client = ttpRepository.findByClientId(decodedClientId).orElseThrow(() -> new RuntimeException());
+        var client = ttpRepository.findByClientId(decodedClientId).orElseThrow(() -> new RuntimeException("Client with id " + decodedClientId + " not found"));
 
         var encryptedSessionKey = cryptoService.rsaEncrypt(
                 cryptoService.pkBytesToObject(
                     client.getPublicKey()
-                ).orElseThrow(() -> new RuntimeException()),
+                ),
                 s.getSessionKey()
-        ).orElseThrow(() -> new RuntimeException());
-
+        );
         return ClientSessionDto.builder()
                 .sessionId(s.getSessionId().toString())
                 .sessionKey(encryptedSessionKey)

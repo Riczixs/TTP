@@ -39,7 +39,6 @@ public class CryptoService {
         Base64.Decoder decoder = Base64.getDecoder();
         return decoder.decode(data);
     }
-
     /**
      *
      * @param data (raw bytes)
@@ -56,27 +55,27 @@ public class CryptoService {
      * @param data (raw bytes)
      * @return base64 string
      */
-    public Optional<String> rsaEncrypt(PublicKey publicKey, byte[] data){
+    public String rsaEncrypt(PublicKey publicKey, byte[] data){
         try {
             Cipher encryptCipher = Cipher.getInstance("RSA/ECB/OAEPWithSHA-256AndMGF1Padding");
             encryptCipher.init(Cipher.ENCRYPT_MODE, publicKey); //Someone's PK
-            return Optional.of(encryptBase64(encryptCipher.doFinal(data)));
-        }catch (Exception exception){
-            return Optional.empty();
+            return encryptBase64(encryptCipher.doFinal(data));
+        }catch (Exception e){
+            throw new RuntimeException("Error during rsa ENCRYPT");
         }
     }
 
-    public Optional<byte[]> rsaDecrypt(byte[] data, PrivateKey privateKey){
+    public byte[] rsaDecrypt(byte[] data, PrivateKey privateKey){
         try{
             Cipher decryptCipher = Cipher.getInstance("RSA/ECB/OAEPWithSHA-256AndMGF1Padding");
             decryptCipher.init(Cipher.DECRYPT_MODE, privateKey);
-            return Optional.of(decryptCipher.doFinal((data)));
-        }catch (Exception exception){
-            return Optional.empty();
+            return decryptCipher.doFinal((data));
+        }catch (Exception e){
+            throw new RuntimeException("Error during rsa DECRYPT");
         }
     }
 
-    public Optional<X509Certificate> createCertificate(PublicKey clientPublicKey, PrivateKey issuerPrivateKey){ //Someone public key
+    public X509Certificate createCertificate(PublicKey clientPublicKey, PrivateKey issuerPrivateKey){ //Someone public key
         try{
             X509v1CertificateBuilder cert = new JcaX509v1CertificateBuilder(
                     new X500Name("CN= ISSUER CA"),
@@ -86,53 +85,55 @@ public class CryptoService {
                     new X500Name("CN = Issuer CA"),
                     clientPublicKey);
             JcaContentSignerBuilder signerBuilder = new JcaContentSignerBuilder("SHA256withRSA");
-            return Optional.of(new JcaX509CertificateConverter()
+            return new JcaX509CertificateConverter()
                     .getCertificate(
                             cert.build(
                                     signerBuilder.build(
                                             issuerPrivateKey
                                     )
                             )
-                    )
-            );
-        }catch (Exception exception){
-            return Optional.empty();
+                    );
+        }catch (Exception e){
+            throw new RuntimeException("Error during certificate creation");
         }
     }
 
     public void verifyCertificate(X509Certificate certificate, PublicKey issuerPublicKey){
         try {
             certificate.verify(issuerPublicKey);
-            System.out.println("VALID CERT");
-        }catch (Exception exception){
-            System.out.println("NOT VALID CERT");
+        }catch (Exception e){
+            throw new RuntimeException("Error during certificate validation");
         }
     }
 
-    public Optional<PublicKey> pkBytesToObject(byte[] keyBytes){
+    public PublicKey pkBytesToObject(byte[] keyBytes){
         try{
-            KeyFactory keyFactory = KeyFactory.getInstance("RSA", "BCFIPS");
-            return Optional.of(keyFactory.generatePublic(new X509EncodedKeySpec(keyBytes)));
-        }catch(GeneralSecurityException e){
-            return Optional.empty();
+            KeyFactory keyFactory = KeyFactory.getInstance("RSA");
+            return keyFactory.generatePublic(new X509EncodedKeySpec(keyBytes));
+        }catch(Exception e){
+            throw new RuntimeException("Error during (byte[] -> PublicKey) conversion)");
         }
     }
 
-    public Optional<X509Certificate> certBytesToObject(byte[] certBytes) throws GeneralSecurityException {
-        CertificateFactory certFactory = CertificateFactory.getInstance("X.509", "BCFIPS");
-        InputStream certStream = new ByteArrayInputStream(certBytes);
-        return Optional.of((X509Certificate) certFactory.generateCertificate(certStream));
+    public X509Certificate certBytesToObject(byte[] certBytes) {
+        try {
+            CertificateFactory certFactory = CertificateFactory.getInstance("X.509");
+            InputStream certStream = new ByteArrayInputStream(certBytes);
+            return (X509Certificate) certFactory.generateCertificate(certStream);
+        }catch (Exception e){
+            throw new RuntimeException("Error during (byte[] -> X509Certificate) conversion");
+        }
     }
 
-    public Optional<SecretKey> createSessionKey() {
+    public SecretKey createSessionKey() {
         try{
             SecureRandom sr = new SecureRandom();
-            KeyGenerator kg = KeyGenerator.getInstance("AES", "BCFIPS");
+            KeyGenerator kg = KeyGenerator.getInstance("AES");
             kg.init(sr);
             SecretKey key = kg.generateKey();
-            return Optional.of(key);
-        }catch(NoSuchAlgorithmException |  NoSuchProviderException e){
-            return Optional.empty();
+            return key;
+        }catch(Exception e){
+            throw new RuntimeException("Error during session creation");
         }
     }
 }

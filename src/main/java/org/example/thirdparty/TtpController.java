@@ -2,6 +2,8 @@ package org.example.thirdparty;
 
 import lombok.RequiredArgsConstructor;
 import org.example.thirdparty.Crypto.SecurityService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -18,7 +20,7 @@ import static org.springframework.http.ResponseEntity.ok;
 @RequiredArgsConstructor
 public class TtpController {
     private final SecurityService securityService;
-
+    private final Logger logger = LoggerFactory.getLogger(TtpController.class);
     @GetMapping(path = "/publickey", produces = "text/plain")
     public ResponseEntity<String> getPublicKey(){
         return ResponseEntity.ok(securityService.getPublicKey());
@@ -28,7 +30,6 @@ public class TtpController {
      * @param payload (publicKey in UUID, clientId PEM string certificate)
      * @return PEM string certificate
      */
-    /// /// /// MARYSIA BN NOTES!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     @PostMapping(path = "/register", consumes = "application/json", produces = "text/plain")
     public ResponseEntity<String> register(@RequestBody ClientRegisterDto payload){
         try{
@@ -47,13 +48,15 @@ public class TtpController {
     @PostMapping(path ="/auth", consumes = "application/json", produces = "application/json")
     public ResponseEntity<ClientSessionDto> auth(@RequestBody ClientAuthDto payload){
         try{
+            ClientSessionDto client = null;
             if(payload.sessionId().isEmpty()){ //First of session init
-                var client = securityService.clientAuthorization(payload);
-                return ResponseEntity.ok(client);
+                client = securityService.clientAuthorization(payload);
+                logger.debug("Client has been authenticated");
             }else{ //Second of session init
-                var client = securityService.sessionAuthorization(payload);
-                return ResponseEntity.ok(client);
+                client = securityService.sessionAuthorization(payload);
+                logger.debug("New Session established!");
             }
+            return ResponseEntity.ok(client);
         }catch (Exception e){
             return ResponseEntity.badRequest().build();
         }

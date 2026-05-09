@@ -2,6 +2,8 @@ package org.bsk_project.server;
 import lombok.Getter;
 import lombok.Setter;
 import org.bsk_project.server.Crypto.CryptoService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -15,8 +17,9 @@ import java.util.UUID;
 
 @Service
 public class ServService {
-    private CryptoService cryptoService;
-    private HttpService httpService;
+    private final Logger logger = LoggerFactory.getLogger(ServService.class);
+    private final CryptoService cryptoService;
+    private final HttpService httpService;
     public ServService(HttpService httpService) {
         this.httpService = httpService;
         this.cryptoService = new CryptoService();
@@ -31,49 +34,63 @@ public class ServService {
     }
 
     public void getTtpPublicKey(){
-        Credentials.ttpPublicKey = httpService.getKey().orElseThrow(RuntimeException::new);
+        try{
+            Credentials.ttpPublicKey = httpService.getKey();
+        }catch (Exception e){
+            throw new RuntimeException(e.getMessage());
+        }
     }
 
     public String register() {
         try{
-            getTtpPublicKey();
+            logger.info("Registering to TTP");
+            ObjectMapper mapper = new ObjectMapper();
+            Map<String, String> payload = new HashMap();
+            var tpk = cryptoService.pkBytesToObject(
+                        cryptoService.decodeBase64(Credentials.ttpPublicKey)
+            );
+            var rsaId = cryptoService.rsaEncrypt(
+                            tpk,
+                            Credentials.id.getBytes()
+            );
+            payload.put("publicKey", cryptoService.encodeBase64(Credentials.keyPair.getPublic().getEncoded()));
+            payload.put("clientId", rsaId);
+            Credentials.certificate = httpService.register(mapper.writeValueAsString(payload));
+            return Credentials.certificate;
         }catch (Exception e) {
-            throw new RuntimeException("Error getting TTP Public Key");
+            throw new RuntimeException(e.getMessage());
         }
-        ObjectMapper mapper = new ObjectMapper();
-        Map<String, String> payload = new HashMap();
-        var tpk = cryptoService.pkBytesToObject(cryptoService.decodeBase64(Credentials.ttpPublicKey))
-                                .orElseThrow(()-> new RuntimeException("Could not decrypt the key"));
-        var rsaId = cryptoService.rsaEncrypt(
-                        tpk,
-                        Credentials.id.getBytes()
-                    ).orElseThrow(() -> new RuntimeException("Error while encrypting the id"));
-        payload.put("publicKey", cryptoService.encryptBase64(Credentials.keyPair.getPublic().getEncoded()));
-        payload.put("clientId", rsaId);
-        Credentials.certificate = httpService.register(mapper.writeValueAsString(payload)).orElseThrow(RuntimeException::new);
-        return Credentials.certificate;
     }
 
     public String authenticate() {
-        Map<String, String> payload = new HashMap();
-        payload.put("clientId", cryptoService.rsaEncrypt(
-                                    cryptoService.pkBytesToObject(
-                                        cryptoService.decodeBase64(Credentials.ttpPublicKey)
-                                    ).orElseThrow(() -> new RuntimeException("Could not decrypt the key")),
-                                    Credentials.id.getBytes()
-                                ).orElseThrow(()-> new RuntimeException("Could not encrypt the id"))
-        );
-        payload.put("cert", Credentials.certificate);
-        payload.put("sessionId", "");
-        ObjectMapper mapper = new ObjectMapper();
-        var session = httpService.authenticate(mapper.writeValueAsString(payload)).orElseThrow(RuntimeException::new);
-        /**
-         * TODO DECODE SESSION KEY BECAUSE IT IS RSA ENCRYPTED!!!!!!!!!!!!!
-         */
-        JsonNode jsonNode = mapper.readTree(session);
-        Credentials.sessionId = jsonNode.get("sessionId").asText();
-        Credentials.sessionKey = jsonNode.get("sessionKey").asText();
-        return session;
+        logger.debug("Server authentication process starting");
+        try{
+            Map<String, String> payload = new HashMap();
+            payload.put("clientId", cryptoService.rsaEncrypt(
+                            cryptoService.pkBytesToObject(
+                                    cryptoService.decodeBase64(Credentials.ttpPublicKey)
+                            ),
+                            Credentials.id.getBytes()
+                    )
+            );
+            payload.put("cert", Credentials.certificate);
+            payload.put("sessionId", "");
+            ObjectMapper mapper = new ObjectMapper();
+            var session = httpService.authenticate(mapper.writeValueAsString(payload));
+            JsonNode jsonNode = mapper.readTree(session);
+            Credentials.sessionId = jsonNode.get("sessionId").asText();
+            Credentials.sessionKey = cryptoService.encodeBase64(
+                cryptoService.rsaDecrypt(
+                    cryptoService.decodeBase64(jsonNode.get("sessionKey").asText()
+                    ),
+                    Credentials.keyPair.getPrivate()
+                )
+            );
+            logger.info("New session credentials received");
+            return session;
+        }catch(Exception e){
+            throw new RuntimeException(e.getMessage());
+        }
     }
 
         /**
@@ -90,15 +107,17 @@ public class ServService {
          */
     public void initSession() {
         try{
-            if(Credentials.ttpPublicKey == null){
+            if(Credentials.ttpPublicKey == null) {
                 getTtpPublicKey();
+                logger.debug("TTP Public Key fetched!");
             }
             if(Credentials.certificate == null){
-                register();
-            }
+                    register();
+                    logger.info("Server successfully registered!");
+             }
             authenticate();
         }catch(Exception e){
-            throw new RuntimeException("Error initializing session");
+            throw new RuntimeException(e.getMessage());
         }
     }
 

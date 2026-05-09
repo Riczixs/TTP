@@ -1,5 +1,7 @@
 package org.bsk_project.server;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -8,8 +10,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 @Controller
 @RequestMapping("/api")
 public class ServerController {
-
-    public ServService serverService;
+    private final Logger logger = LoggerFactory.getLogger(ServerController.class);
+    private final ServService serverService;
     public ServerController(ServService serverService) {
         this.serverService = serverService;
     }
@@ -21,9 +23,12 @@ public class ServerController {
     @GetMapping
     public ResponseEntity<?> getServer(){
         try{
+            logger.info("Resource request received");
             serverService.initSession();
+            logger.debug("Authentication successful");
             return ResponseEntity.noContent().build();
         }catch (Exception e){
+            logger.error(e.getMessage());
             return ResponseEntity.internalServerError().build();
         }
     }
@@ -34,7 +39,7 @@ public class ServerController {
             var result = serverService.register();
             return ResponseEntity.ok(result);
         }catch (Exception e){
-            return ResponseEntity.badRequest().body(e.getMessage());
+            return ResponseEntity.badRequest().build();
         }
     }
 
@@ -42,9 +47,11 @@ public class ServerController {
     public ResponseEntity<String> auth(){
         try{
             var result = serverService.authenticate();
+            logger.info("Server successfully authenticated");
             return ResponseEntity.ok(result);
         }catch (Exception e){
-            return ResponseEntity.badRequest().body(e.getMessage());
+            logger.warn(e.getMessage());
+            return ResponseEntity.badRequest().build();
         }
     }
 

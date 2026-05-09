@@ -3,6 +3,8 @@ import jakarta.servlet.http.HttpSession;
 import lombok.Getter;
 import lombok.Setter;
 import org.bsk_project.client.Crypto.CryptoService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -16,8 +18,9 @@ import java.util.UUID;
 
 @Service
 public class ClientService {
-    private HttpService httpService;
-    private CryptoService cryptoService;
+    private final Logger logger = LoggerFactory.getLogger(ClientService.class);
+    private final HttpService httpService;
+    private final CryptoService cryptoService;
     public ClientService(HttpService httpService) {
         this.httpService = httpService;
         this.cryptoService = new CryptoService();
@@ -81,9 +84,10 @@ public class ClientService {
      */
     public void serverAuthentication() {
         try{
+            logger.debug("Init of communication with server");
             httpService.initServerSession();
         }catch (Exception e) {
-            throw new RuntimeException("Error initializing server session");
+            throw new RuntimeException(e.getMessage());
         }
     }
 
